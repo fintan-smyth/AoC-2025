@@ -17,7 +17,7 @@ NAME = solve
 all: $(NAME)
 
 $(NAME): $(BUILD_DIR) $(OBJ)
-	$(CC) $(CFLAGS) $(DBG_FLAGS) $(OBJ) -o $(NAME) -lm
+	$(CC) $(CFLAGS) $(DBG_FLAGS) $(OBJ) -o $(NAME)
 
 $(OBJ): $(BUILD_DIR)%.o: $(SRC_DIR)%.c
 	$(CC) $(CFLAGS) $(DBG_FLAGS) -c $^ -o $@
