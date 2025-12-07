@@ -44,6 +44,31 @@ void	free_ptr_array(void **lines, uint64_t n)
 	free(lines);
 }
 
+uint64_t	process_line(char **lines, uint64_t lineno)
+{
+	uint64_t	n_splits = 0;
+	char		*cur_line = lines[lineno];
+	char		*next_line = lines[lineno + 1];
+
+	for (uint64_t i = 0; cur_line[i] != '\0'; i++)
+	{
+		if (cur_line[i] == 'S' || cur_line[i] == '|')
+		{
+			if (next_line[i] != '^')
+				next_line[i] = '|';
+			else
+			{
+				n_splits++;
+				if (i > 0)
+					next_line[i - 1] = '|';
+				if (next_line[i + 1] != '\0')
+					next_line[i + 1] = '|';
+			}
+		}
+	}
+	return (n_splits);
+}
+
 int	main(int argc, char **argv)
 {
 	if (argc != 2)
@@ -61,9 +86,12 @@ int	main(int argc, char **argv)
 	fclose(fp);
 
 	for (uint64_t i = 0; i < n_lines; i++)
-	{
 		printf("\e[31m>\e[m %s\n", lines[i]);
-	}
+	for (uint64_t i = 0; i < n_lines - 1; i++)
+		total += process_line(lines, i);
+	for (uint64_t i = 0; i < n_lines; i++)
+		printf("\e[31m>\e[m %s\n", lines[i]);
 
+	printf("total: %lu\n", total);
 	free_ptr_array((void **)lines, n_lines);
 }
