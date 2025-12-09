@@ -1,5 +1,4 @@
-input.txt
-test.txt
+*.txt
 day*
 solve
 
