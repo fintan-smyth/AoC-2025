@@ -32,6 +32,27 @@ typedef struct dist_node
 	struct dist_node	*next;
 }	t_distnode;
 
+struct adjlist
+{
+	uint64_t		vert_idx;
+	struct adjlist	*next;
+};
+
+struct graph
+{
+	uint64_t		n_vertices;
+	struct adjlist	**vertices;
+	uint8_t			*visited;
+};
+
+struct graphbuilder
+{
+	struct graph	*graph;
+	t_vec3			*vecs;
+	uint64_t		n_edges;
+	uint64_t		answer_p2;
+};
+
 void	trim_nl(char *line)
 {
 	int32_t	len = strlen(line);
@@ -195,178 +216,109 @@ void	traverse_dist_tree(t_distnode *node, int order,
 		f(node, data);
 }
 
-bool	check_linked(t_distnode *node1, t_distnode *node2)
+struct adjlist	*new_adjnode(uint64_t vertex)
 {
-	if (node1->pos1 == node2->pos1)
-		return (true);
-	if (node1->pos1 == node2->pos2)
-		return (true);
-	if (node1->pos2 == node2->pos1)
-		return (true);
-	if (node1->pos2 == node2->pos2)
-		return (true);
-	return (false);
+	struct adjlist	*new = malloc(sizeof(struct adjlist));
+
+	new->vert_idx = vertex;
+	new->next = NULL;
+	return (new);
 }
 
-void	insert_dist_list(t_distnode *list, t_distnode *to_insert)
+void	add_to_adjlist(struct adjlist **list, struct adjlist *node)
 {
-	t_distnode	*tmp = list->next;
-
-	list->next = to_insert;
-	to_insert->next = tmp;
-}
-
-struct connections {
-	t_distnode	**connections;
-	uint64_t	n_conns;
-};
-
-void	add_connection(t_distnode *node, struct connections *conns)
-{
-	if (conns->n_conns >= max_conns)
+	if (list == NULL)
 		return ;
-	t_distnode	**connections = conns->connections;
-	t_distnode	*curr_connection;
-	uint64_t	i;
 
-	conns->n_conns++;
-	for (i = 0; connections[i] != NULL; i++)
-	{
-		curr_connection = connections[i];
-		while (curr_connection != NULL)
-		{
-			if (check_linked(curr_connection, node))
-			{
-				insert_dist_list(curr_connection, node);
-				return ;
-			}
-			curr_connection = curr_connection->next;
-		}
-	}
-	connections[i] = node;
+	node->next = *list;
+	*list = node;
 }
 
-t_distnode *dist_last(t_distnode *head)
+void	add_graph_edge(struct graph *graph, uint64_t src, uint64_t dst)
 {
-	t_distnode	*curr = head;
+	struct adjlist	*new = new_adjnode(dst);
+	new->next = graph->vertices[src];
+	add_to_adjlist(&graph->vertices[src], new);
 
-	while (curr->next != NULL)
-		curr = curr->next;
-	return (curr);
+	new = new_adjnode(src);
+	new->next = graph->vertices[dst];
+	add_to_adjlist(&graph->vertices[dst], new);
 }
 
-bool	check_shared_connections(t_distnode *list1, t_distnode *list2)
+void	add_edge_from_distnode(t_distnode *dist_node, void *graph_builder)
 {
-	t_distnode *node1;
-	t_distnode *node2;
+	struct graphbuilder *gbuilder = graph_builder;
+	if (gbuilder->n_edges >= max_conns)
+		return ;
 
-	for (node1 = list1; node1 != NULL; node1 = node1->next)
-	{
-		for (node2 = list2; node2 != NULL; node2 = node2->next)
-		{
-			if (check_linked(node1, node2) == true)
-			{
-				printf("------------\nConnection found!\n");
-				print_distnode(node1, NULL);
-				print_distnode(node2, NULL);
-				printf("------------\n");
-				return (true);
-			}
-		}
-	}
-	return (false);
+	uint64_t	src = dist_node->pos1 - gbuilder->vecs;
+	uint64_t	dst = dist_node->pos2 - gbuilder->vecs;
+
+	add_graph_edge(gbuilder->graph, src, dst);
+	gbuilder->n_edges++;
 }
 
-void	join_circuits(struct connections *connections)
+uint64_t	get_component_size(struct graph *graph, uint64_t vertex)
 {
-	t_distnode	**conns = connections->connections;
-	for (uint64_t i = 0; conns[i] != NULL; i++)
-	{
-		uint64_t j = i + 1;
-		while (conns[j] != NULL)
-		{
-			if (check_shared_connections(conns[i], conns[j]) == true)
-			{
-				printf("Joining %lu to %lu\n\n", i, j);
-				t_distnode *last = dist_last(conns[i]);
-				last->next = conns[j];
-				memmove(&conns[j], &conns[j + 1], (max_conns - (j + 1)) * sizeof(t_distnode *));
-			}
-			else
-				j++;
-		}
-	}
-}
+	uint64_t		size = 1;
+	struct adjlist	*curr;
 
-uint64_t	get_num_conns(t_distnode *head)
-{
-	uint64_t	size = 0;
-	t_distnode	*curr = head;
-
+	graph->visited[vertex] = 1;
+	curr = graph->vertices[vertex];
 	while (curr != NULL)
 	{
-		size++;
+		if (graph->visited[curr->vert_idx] == 0)
+			size += get_component_size(graph, curr->vert_idx);
 		curr = curr->next;
 	}
+
 	return (size);
 }
 
-bool	vec_in_arr(t_vec3 **arr, t_vec3 *vec)
+void	find_final_connection(t_distnode *dist_node, void *graph_builder)
 {
-	for (uint64_t i = 0; arr[i] != NULL; i++)
-	{
-		if (arr[i]->x == vec->x && arr[i]->y == vec->y && arr[i]->z == vec->z)
-		// if (arr[i] == vec)
-			return (true);
-	}
-	return (false);
-}
+	struct graphbuilder *gbuilder = graph_builder;
+	uint64_t			src = dist_node->pos1 - gbuilder->vecs;
+	uint64_t			dst = dist_node->pos2 - gbuilder->vecs;
 
-uint64_t	get_circuit_size(t_distnode *head, t_vec3 *vecs)
-{
-	uint64_t	size = 0;
-	t_distnode	*curr = head;
-	t_vec3		**unique = calloc(get_num_conns(head) + 10, sizeof(t_vec3 *));
-
-	while (curr != NULL)
-	{
-		if (!vec_in_arr(unique, curr->pos1))
-		{
-			unique[size++] = curr->pos1;
-			// printf("%3lu\n", curr->pos1 - vecs);
-			printf("(%5lu,%5lu,%5lu)\n", curr->pos1->x, curr->pos1->y, curr->pos1->z);
-		}
-		if (!vec_in_arr(unique, curr->pos2))
-		{
-			unique[size++] = curr->pos2;
-			// printf("%3lu\n", curr->pos2 - vecs);
-			printf("(%5lu,%5lu,%5lu)\n", curr->pos2->x, curr->pos2->y, curr->pos2->z);
-		}
-		curr = curr->next;
-	}
-	free(unique);
-	return (size);
-}
-
-t_distnode *last_node = NULL;
-double		min_distance = 1000000000;
-uint64_t	n_nodes = 0;
-
-void	get_min_distance(t_distnode *node, void *null)
-{
-	if (n_nodes >= max_conns)
+	if (gbuilder->answer_p2 != 0)
 		return ;
-	double distance;
-	if (last_node != NULL)
+
+	add_graph_edge(gbuilder->graph, src, dst);
+
+	memset(gbuilder->graph->visited, 0, gbuilder->graph->n_vertices);
+	uint64_t size = get_component_size(gbuilder->graph, 0);
+	// printf("component_size: %lu\n", size);
+	if (size == gbuilder->graph->n_vertices)
 	{
-		distance = node->distance - last_node->distance;
-		if (distance < min_distance)
-			min_distance = distance;
+		printf("edges required: %lu\n", gbuilder->n_edges);
+		print_distnode(dist_node, NULL);
+		gbuilder->answer_p2 = dist_node->pos1->x * dist_node->pos2->x;
 	}
-	last_node = node;
+	gbuilder->n_edges++;
 }
 
+void	print_adjlist(struct graph *graph, t_vec3 *vecs)
+{
+	for (uint64_t i = 0; i < graph->n_vertices; i++)
+	{
+		struct adjlist *curr = graph->vertices[i];
+		if (curr == NULL)
+			continue ;
 
+		printf("Component %lu\n", i);
+		while (curr != NULL)
+		{
+			printf("(%5lu,%5lu,%5lu)\n",
+				vecs[curr->vert_idx].x,
+				vecs[curr->vert_idx].y,
+				vecs[curr->vert_idx].z
+			);
+			curr = curr->next;
+		}
+		printf("\n");
+	}
+}
 
 int	main(int argc, char **argv)
 {
@@ -398,51 +350,54 @@ int	main(int argc, char **argv)
 
 	uint64_t	n_links = 0;
 	t_distnode	*dist_tree = build_dist_tree(vecs, n_lines, &n_links);
-	traverse_dist_tree(dist_tree, IN_ORD, get_min_distance, NULL);
-	// printf("min: %f\n", min_distance);
-	// return 0;
 
 	traverse_dist_tree(dist_tree, IN_ORD, print_distnode, NULL);
 	printf("n_links: %lu\n\n", n_links);
 
-	struct connections conns;
+	struct graph graph = {
+		.n_vertices = n_lines,
+		.vertices = calloc(n_lines, sizeof(struct adjlist *)),
+		.visited = calloc(n_lines, sizeof(uint8_t)),
+	};
 
-	conns.connections = calloc(max_conns, sizeof(t_distnode *));
-	conns.n_conns = 0;
-	traverse_dist_tree(dist_tree, IN_ORD,
-		(void (*)(t_distnode *, void *))add_connection, &conns);
+	struct graphbuilder gbuilder = {
+		.graph = &graph,
+		.vecs = vecs,
+		.n_edges = 0,
+		.answer_p2 = 0,
+	};
 
-	// for (uint64_t i = 0; conns.connections[i] != NULL; i++)
+	// traverse_dist_tree(dist_tree, IN_ORD, add_edge_from_distnode, &gbuilder);
+	// print_adjlist(&graph, vecs);
+	// uint64_t	biggest[3] = {};
+	//
+	// for (uint64_t i = 0; i < graph.n_vertices; i++)
 	// {
-	// 	for (t_distnode *curr = conns.connections[i]; curr != NULL; curr = curr->next)
+	// 	if (graph.visited[i] == 0)
 	// 	{
-	// 		print_distnode(curr, NULL);
+	// 		uint64_t	size = get_component_size(&graph, i);
+	// 		printf("circuit size: %lu\n", size);
+	// 		if (size > biggest[0])
+	// 		{
+	// 			biggest[2] = biggest[1];
+	// 			biggest[1] = biggest[0];
+	// 			biggest[0] = size;
+	// 		}
+	// 		else if (size > biggest[1])
+	// 		{
+	// 			biggest[2] = biggest[1];
+	// 			biggest[1] = size;
+	// 		}
+	// 		else if (size > biggest[2])
+	// 			biggest[2] = size;
 	// 	}
-	// 	printf("len: %lu\n\n", get_circuit_size(conns.connections[i]));
 	// }
-	join_circuits(&conns);
-	uint64_t	biggest[3] = {};
-	for (uint64_t i = 0; conns.connections[i] != NULL; i++)
-	{
-		uint64_t	len = get_circuit_size(conns.connections[i], vecs);
-		printf("len: %lu\n\n", len);
-		if (len > biggest[0])
-		{
-			biggest[2] = biggest[1];
-			biggest[1] = biggest[0];
-			biggest[0] = len;
-		}
-		else if (len > biggest[1])
-		{
-			biggest[2] = biggest[1];
-			biggest[1] = len;
-		}
-		else if (len > biggest[2])
-			biggest[2] = len;
-	}
+	//
+	// printf("biggest: %lu %lu %lu\n", biggest[0], biggest[1], biggest[2]);
+	// total = biggest[0] * biggest[1] * biggest[2];
 
-	printf("biggest: %lu %lu %lu\n", biggest[0], biggest[1], biggest[2]);
-	total = biggest[0] * biggest[1] * biggest[2];
+	traverse_dist_tree(dist_tree, IN_ORD, find_final_connection, &gbuilder);
+	total = gbuilder.answer_p2;
 
 	printf("total: %lu\n", total);
 	free_ptr_array((void **)lines, n_lines);

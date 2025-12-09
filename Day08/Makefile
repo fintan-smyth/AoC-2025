@@ -3,7 +3,7 @@ CC = gcc
 CFLAGS = -Wall -Wextra #-O0
 
 DBG_FLAGS =		-g3 \
-				-fsanitize=address,undefined,bounds-strict \
+				# -fsanitize=address,undefined,bounds-strict \
 
 SRC_DIR := ./src
 BUILD_DIR:= ./build
