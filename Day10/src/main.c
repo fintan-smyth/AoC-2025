@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <unistd.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <pthread.h>
@@ -14,6 +15,12 @@ enum
 	J_UNDER
 };
 
+struct log
+{
+	uint64_t	idx;
+	uint64_t	min_presses;
+};
+
 struct machine
 {
 	uint64_t	lights;
@@ -23,6 +30,7 @@ struct machine
 	uint16_t	*joltages;
 	uint64_t	min_presses;
 	uint64_t	idx;
+	int			logfd;
 };
 
 typedef struct buttonqueue
@@ -479,6 +487,14 @@ void	get_min_presses_joltage(struct machine *machine, uint16_t *joltage_state, u
 	free(joltage_state);
 }
 
+void	log_answer(struct machine *machine)
+{
+	FILE *fp = fopen("./log", "a");
+	fprintf(fp, "%lu,%lu\n", machine->idx, machine->min_presses);
+	fflush(fp);
+	fclose(fp);
+}
+
 void	*routine(void *arg)
 {
 	struct machine *machine = arg;
@@ -486,9 +502,41 @@ void	*routine(void *arg)
 	get_min_presses_joltage(machine, joltage_state, 0);
 
 	pthread_mutex_lock(&print_lock);
+	log_answer(machine);
 	printf("Min found! thread \e[3%lum%lu\e[m exiting...\n", machine->idx % 7 + 1, machine->idx);
 	pthread_mutex_unlock(&print_lock);
 	return (NULL);
+}
+
+struct log *read_log(void)
+{
+	FILE 		*fp = fopen("./log", "r");
+	uint64_t	size;
+	char		*line = NULL;
+	struct log	*logs = calloc(256, sizeof(*logs));
+	uint64_t	i = 0;
+	char		*endptr;
+
+	while (getline(&line, &size, fp) != -1)
+	{
+		if (line == NULL)
+			break ;
+		logs[i].idx = strtol(line, &endptr, 10);
+		logs[i].min_presses = strtol(endptr + 1, &endptr, 10);
+		i++;
+	}
+	fclose(fp);
+	return (logs);
+}
+
+bool	log_exists(uint64_t idx, struct log *logs)
+{
+	for (uint64_t i = 0; i < 256; i++)
+	{
+		if (logs[i].min_presses > 0 && idx == logs[i].idx)
+			return true;
+	}
+	return false;
 }
 
 int	main(int argc, char **argv)
@@ -510,6 +558,7 @@ int	main(int argc, char **argv)
 	struct machine	**machines = calloc(n_lines, sizeof(*machines));
 	pthread_t		*threads = calloc(n_lines, sizeof(pthread_t));
 
+	struct log *logs = read_log();
 	for (uint64_t i = 0; i < n_lines; i++)
 	{
 		uint64_t presses;
@@ -521,7 +570,8 @@ int	main(int argc, char **argv)
 		// presses = machines[i]->min_presses;
 		// printf("presses: %lu\n", presses);
 		// total += presses;
-		pthread_create(&threads[i], NULL, routine, machines[i]);
+		if (!log_exists(i, logs))
+			pthread_create(&threads[i], NULL, routine, machines[i]);
 	}
 	for (uint64_t i = 0; i < n_lines; i++)
 		pthread_join(threads[i], NULL);
