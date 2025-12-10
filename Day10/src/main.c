@@ -8,6 +8,8 @@
 #include <stdbool.h>
 #include <pthread.h>
 
+#define N_LOGS 4096
+
 enum
 {
 	J_MATCH,
@@ -19,6 +21,7 @@ struct log
 {
 	uint64_t	idx;
 	uint64_t	min_presses;
+	bool		final;
 };
 
 struct machine
@@ -452,6 +455,17 @@ int32_t	get_charge_state(struct machine *machine, uint16_t *joltage)
 	return (out);
 }
 
+void	log_answer(struct machine *machine, bool final)
+{
+	FILE *fp = fopen("./log", "a");
+	if (final)
+		fprintf(fp, "+%lu,%lu\n", machine->idx, machine->min_presses);
+	else
+		fprintf(fp, "-%lu,%lu\n", machine->idx, machine->min_presses);
+	fflush(fp);
+	fclose(fp);
+}
+
 void	get_min_presses_joltage(struct machine *machine, uint16_t *joltage_state, uint64_t n_presses)
 {
 	int32_t	state = get_charge_state(machine, joltage_state);
@@ -469,6 +483,7 @@ void	get_min_presses_joltage(struct machine *machine, uint16_t *joltage_state, u
 		pthread_mutex_lock(&print_lock);
 		// print_machine(machine);
 		printf("\e[32mmatch!\e[m n_presses: %lu idx: \e[3%lum%lu\e[m\n", n_presses, machine->idx % 7 + 1, machine->idx);
+		log_answer(machine, false);
 		pthread_mutex_unlock(&print_lock);
 		free(joltage_state);
 		return ;
@@ -487,14 +502,6 @@ void	get_min_presses_joltage(struct machine *machine, uint16_t *joltage_state, u
 	free(joltage_state);
 }
 
-void	log_answer(struct machine *machine)
-{
-	FILE *fp = fopen("./log", "a");
-	fprintf(fp, "%lu,%lu\n", machine->idx, machine->min_presses);
-	fflush(fp);
-	fclose(fp);
-}
-
 void	*routine(void *arg)
 {
 	struct machine *machine = arg;
@@ -502,7 +509,7 @@ void	*routine(void *arg)
 	get_min_presses_joltage(machine, joltage_state, 0);
 
 	pthread_mutex_lock(&print_lock);
-	log_answer(machine);
+	log_answer(machine, true);
 	printf("Min found! thread \e[3%lum%lu\e[m exiting...\n", machine->idx % 7 + 1, machine->idx);
 	pthread_mutex_unlock(&print_lock);
 	return (NULL);
@@ -513,7 +520,7 @@ struct log *read_log(void)
 	FILE 		*fp = fopen("./log", "r");
 	uint64_t	size;
 	char		*line = NULL;
-	struct log	*logs = calloc(256, sizeof(*logs));
+	struct log	*logs = calloc(N_LOGS, sizeof(*logs));
 	uint64_t	i = 0;
 	char		*endptr;
 
@@ -521,6 +528,11 @@ struct log *read_log(void)
 	{
 		if (line == NULL)
 			break ;
+		if (*line == '+')
+			logs[i].final = true;
+		else
+			logs[i].final = false;
+		line++;
 		logs[i].idx = strtol(line, &endptr, 10);
 		logs[i].min_presses = strtol(endptr + 1, &endptr, 10);
 		i++;
@@ -529,12 +541,16 @@ struct log *read_log(void)
 	return (logs);
 }
 
-bool	log_exists(uint64_t idx, struct log *logs)
+bool	answer_found(struct machine *machine, struct log *logs)
 {
-	for (uint64_t i = 0; i < 256; i++)
+	for (uint64_t i = 0; i < N_LOGS; i++)
 	{
-		if (logs[i].min_presses > 0 && idx == logs[i].idx)
-			return true;
+		if (logs[i].min_presses > 0 && machine->idx == logs[i].idx)
+		{
+			machine->min_presses = logs[i].min_presses;
+			if (logs[i].final == true)
+				return true;
+		}
 	}
 	return false;
 }
@@ -570,7 +586,7 @@ int	main(int argc, char **argv)
 		// presses = machines[i]->min_presses;
 		// printf("presses: %lu\n", presses);
 		// total += presses;
-		if (!log_exists(i, logs))
+		if (!answer_found(machines[i], logs))
 			pthread_create(&threads[i], NULL, routine, machines[i]);
 	}
 	for (uint64_t i = 0; i < n_lines; i++)
