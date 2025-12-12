@@ -1,8 +1,9 @@
 CC = gcc
 
-CFLAGS = -Wall -Wextra #-O0
+CFLAGS = -Wall -Wextra -Ofast
 
 DBG_FLAGS =		-g3 \
+				# -pg \
 				# -fsanitize=address \
 
 SRC_DIR := ./src
